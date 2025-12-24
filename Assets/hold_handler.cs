@@ -1,13 +1,15 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[RequireComponent(typeof(Rigidbody))]
 public class hold_handler : MonoBehaviour
 {
 	//configuration
 	[SerializeField] float reach = 15f;
-    [SerializeField] float force = 120f;
-	[SerializeField] float damping = 12f;
+    [SerializeField] float spring = 120f;
+	[SerializeField] float damper = 12f;
+	[SerializeField] float limit = 2f;
+	[SerializeField] float bounciness = 0.5f;
+	[SerializeField] float contact = 0.2f;
 	InputAction hold_action;
 	new Camera camera;
 	LineRenderer line_renderer;
@@ -18,6 +20,9 @@ public class hold_handler : MonoBehaviour
 	GameObject anchor = null;
 	float drag_depth = 0f;
 	GameObject stored_game_object = null;
+	//constants
+	const int default_layer = 0;
+	const int outline_layer = 6;
 
 	void Start()
     {
@@ -63,10 +68,13 @@ public class hold_handler : MonoBehaviour
 				if (game_object != stored_game_object)
 				{
 					clear_outline();
-					//fix magic
-					game_object.layer = 6;
+					game_object.layer = outline_layer;
 					stored_game_object = game_object;
 				}
+			}
+			else
+			{
+				clear_outline();
 			}
 		}
 		else
@@ -79,8 +87,7 @@ public class hold_handler : MonoBehaviour
 	{
 		if (stored_game_object != null)
         {
-			//fix magic
-            stored_game_object.layer = 0;
+            stored_game_object.layer = default_layer;
             stored_game_object = null;
         }
 	}
@@ -109,34 +116,20 @@ public class hold_handler : MonoBehaviour
     			joint.yMotion = ConfigurableJointMotion.Limited;
     			joint.zMotion = ConfigurableJointMotion.Limited;
 
-    			SoftJointLimit limit = new SoftJointLimit();
-				//fix magic
-    			limit.limit = 2.0f;
-    			joint.linearLimit = limit;
-				//fix magic
-    			joint.linearLimitSpring = new SoftJointLimitSpring { spring = 100f, damper = 10f };
+    			joint.linearLimit = new SoftJointLimit() { limit = limit, bounciness = bounciness, contactDistance = contact };
+    			joint.linearLimitSpring = new SoftJointLimitSpring { spring = spring, damper = damper };
 
     			joint.angularXMotion = ConfigurableJointMotion.Free;
     			joint.angularYMotion = ConfigurableJointMotion.Free;
     			joint.angularZMotion = ConfigurableJointMotion.Free;
 
-				joint.xDrive = joint_drive_init(force, damping);
-				joint.yDrive = joint_drive_init(force, damping);
-				joint.zDrive = joint_drive_init(force, damping);
+				joint.xDrive = new JointDrive { positionSpring = spring, positionDamper = damper, maximumForce = Mathf.Infinity };
+				joint.yDrive = new JointDrive { positionSpring = spring, positionDamper = damper, maximumForce = Mathf.Infinity };
+				joint.zDrive = new JointDrive { positionSpring = spring, positionDamper = damper, maximumForce = Mathf.Infinity };
 
 				line_renderer.positionCount = 2;
 			}
 		}
-	}
-
-	JointDrive joint_drive_init(float force, float damping)
-	{
-		return new JointDrive
-		{
-			positionSpring = force,
-			positionDamper = damping,
-			maximumForce = Mathf.Infinity,
-		};
 	}
 
 	void drag()
