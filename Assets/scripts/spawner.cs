@@ -71,19 +71,64 @@ public class SPAWNER : MonoBehaviour
                     GameObject collectible_object = Instantiate(prefab, xml_collectible.spawn_position, Quaternion.Euler(xml_collectible.spawn_rotation));
                     if (collectible_object == null)
                     {
-                        Debug.LogWarning($"failed to instantiate prefab with name '{xml_item.prefab_name}'");
+                        Debug.LogWarning($"failed to spawn an instance of prefab with name '{xml_item.prefab_name}'");
                         continue;
                     }
 
                     COLLECTIBLE collectible = collectible_object.GetComponent<COLLECTIBLE>();
                     collectible.item = item;
                     collectible.unique.targetable_id = xml_collectible.targetable_id;
-                    collectible.unique.target_position = xml_collectible.target_position;
-                    collectible.unique.target_rotation = Quaternion.Euler(xml_collectible.target_rotation);
+
+                    if (xml_collectible.target_positionSpecified && xml_collectible.target_rotationSpecified)
+                    {
+                        collectible.unique.should_despawn = false;
+                        collectible.unique.target_position = xml_collectible.target_position;
+                        collectible.unique.target_rotation = Quaternion.Euler(xml_collectible.target_rotation);
+                    }
+                    else if (!xml_collectible.target_positionSpecified && !xml_collectible.target_rotationSpecified)
+                    {
+                        collectible.unique.should_despawn = true;
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"prefab with name '{xml_item.prefab_name}' has invalid instance definition");
+                        continue;
+                    }
                 }
             }
         }
     }
+
+    /*
+    void load_configuration(string relative_path)
+    {
+        string xmlPath = Path.Combine(Application.persistentDataPath, relative_path);
+        string xsdPath = Path.Combine(Application.streamingAssetsPath, "configuration.xsd");
+
+        XmlReaderSettings settings = new XmlReaderSettings();
+        settings.Schemas.Add(null, xsdPath);
+        settings.ValidationType = ValidationType.Schema;
+        
+        // This handler catches "Invalid" data (mismatched tags)
+        settings.ValidationEventHandler += (sender, e) => {
+            Debug.LogError($"XML Validation {e.Severity}: {e.Message}");
+        };
+
+        using (XmlReader reader = XmlReader.Create(xmlPath, settings))
+        {
+            try 
+            {
+                XmlSerializer serializer = new XmlSerializer(typeof(XML_CONFIGURATION));
+                XML_CONFIGURATION configuration = (XML_CONFIGURATION)serializer.Deserialize(reader);
+                // Process as normal...
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError("Failed to deserialize: " + ex.Message);
+            }
+        }
+    }
+    */
 
     public Sprite load_sprite(string relative_path)
     {
@@ -143,8 +188,14 @@ public class XML_COLLECTIBLE
     [XmlElement("spawn_rotation")]
     public Vector3 spawn_rotation;
 
+    [XmlIgnore] 
+    public bool target_positionSpecified; 
+
     [XmlElement("target_position")]
     public Vector3 target_position;
+
+    [XmlIgnore]
+    public bool target_rotationSpecified;
 
     [XmlElement("target_rotation")]
     public Vector3 target_rotation;

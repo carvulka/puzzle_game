@@ -1,3 +1,4 @@
+using NUnit.Framework.Internal;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -12,10 +13,11 @@ public class CHARACTER : MonoBehaviour
 	[SerializeField] float sensitivity = 8f;
 	[SerializeField] Vector3 camera_offset = new Vector3(0f, 0.25f, 0f);
 	[SerializeField] float reach = 4f;
-    [SerializeField] float speed = 49152f;
-    [SerializeField] float airborne_speed = 3136f;
+	[SerializeField] float drag_depth_sensitivity = 16f;
+    [SerializeField] float speed = 750;
+    [SerializeField] float airborne_speed = 250;
     [SerializeField] float max_horizontal_velocity_magnitude = 4f;
-    [SerializeField] float counter_strength = 0.125f;
+    [SerializeField] float counter_strength = 0.25f;
     [SerializeField] float max_slope = 45f;
 	[SerializeField] float grounded_timeout = 0.125f;
 	[SerializeField] Material preview_material;
@@ -29,9 +31,10 @@ public class CHARACTER : MonoBehaviour
 	InputAction move_action;
     InputAction look_action;
 	InputAction drag_action;
+	InputAction change_drag_depth_action;
 	InputAction collect_action;
 	InputAction place_action;
-	InputAction inventory_action;
+	InputAction toggle_inventory_action;
 
 	//state
 	Vector2 move_input = Vector2.zero;
@@ -39,6 +42,7 @@ public class CHARACTER : MonoBehaviour
 	bool drag_is_pressed = false;
     bool drag_was_pressed = false;
     bool drag_was_released = false;
+	Vector2 change_drag_depth_input = Vector2.zero;
 	bool collect_was_pressed = false;
 	bool place_was_pressed = false;
 	bool inventory_was_pressed = false;
@@ -57,9 +61,10 @@ public class CHARACTER : MonoBehaviour
 		this.move_action = InputSystem.actions.FindAction("move");
         this.look_action = InputSystem.actions.FindAction("look");
 		this.drag_action = InputSystem.actions.FindAction("drag");
+		this.change_drag_depth_action = InputSystem.actions.FindAction("change_drag_depth");
 		this.collect_action = InputSystem.actions.FindAction("collect");
 		this.place_action = InputSystem.actions.FindAction("place");
-        this.inventory_action = InputSystem.actions.FindAction("inventory");
+        this.toggle_inventory_action = InputSystem.actions.FindAction("toggle_inventory");
 
 		this.body.freezeRotation = true;
 		this.drag_joint.connectedBody = null;
@@ -72,7 +77,7 @@ public class CHARACTER : MonoBehaviour
 		Cursor.lockState = CursorLockMode.Locked;
 		INVENTORY.instance.gameObject.SetActive(false);
     }
-
+	
 	void Update()
 	{
 		this.set_input();
@@ -89,30 +94,29 @@ public class CHARACTER : MonoBehaviour
         this.look();
 
 		Ray ray = Camera.main.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-		int mask = ~(1 << preview_layer);
-		if (Physics.Raycast(ray, out RaycastHit hit, this.reach, mask))
+		if (Physics.Raycast(ray, out RaycastHit hit, this.reach, ~(1 << preview_layer)))
 		{
 			(ITEM item, COLLECTIBLE.UNIQUE unique) = HOTBAR.instance.selected_slot().try_get();
 			if (item != null)
 			{
-				if (hit.transform.TryGetComponent(out COLLECTIBLE collectible))
+				if (hit.transform.TryGetComponent(out COLLECTIBLE collectible) && !collectible.unique.is_locked)
 				{
 					this.set_outline(hit);
 					this.set_preview(hit, item.prefab);
-					this.handle_collect_was_pressed(hit, collectible);
-					this.handle_place_was_pressed(hit, item, unique);
+					this.poll_collect_was_pressed(hit, collectible);
+					this.poll_place_was_pressed(hit, item, unique);
 				}
 				else if (hit.transform.TryGetComponent(out TARGETABLE targetable) && targetable.id == unique.targetable_id)
 				{
 					this.reset_preview();
 					this.set_outline(hit);
-					this.handle_special_place_was_pressed(hit, item, unique);
+					this.poll_place_was_pressed_on_targetable(hit, item, unique);
 				}
 				else
 				{
 					this.reset_outline();
 					this.set_preview(hit, item.prefab);
-					this.handle_place_was_pressed(hit, item, unique);
+					this.poll_place_was_pressed(hit, item, unique);
 				}
 			}
 			else
@@ -122,18 +126,18 @@ public class CHARACTER : MonoBehaviour
 				if (hit.transform.CompareTag("draggable"))
 				{
 					this.reset_outline();
-					this.handle_drag_was_pressed(hit);
+					this.poll_drag_was_pressed(hit);
 				}
-				else if (hit.transform.TryGetComponent(out COLLECTIBLE collectible))
+				else if (hit.transform.TryGetComponent(out COLLECTIBLE collectible) && !collectible.unique.is_locked)
 				{
 					this.set_outline(hit);
-					this.handle_drag_was_pressed(hit);
-					this.handle_collect_was_pressed(hit, collectible);
+					this.poll_drag_was_pressed(hit);
+					this.poll_collect_was_pressed(hit, collectible);
 				}
 				else if (hit.transform.TryGetComponent(out TARGETABLE _))
 				{
 					this.reset_outline();
-					this.handle_drag_was_pressed(hit);
+					this.poll_drag_was_pressed(hit);
 				}
 				else
 				{
@@ -147,11 +151,11 @@ public class CHARACTER : MonoBehaviour
 			this.reset_preview();
 		}
 
-		handle_drag_is_pressed();
-		handle_drag_was_released();
+		poll_drag_is_pressed();
+		poll_drag_was_released();
 	}
 
-	void handle_drag_is_pressed()
+	void poll_drag_is_pressed()
 	{
 		if (this.drag_is_pressed && this.drag_joint.connectedBody != null)
 		{
@@ -159,7 +163,7 @@ public class CHARACTER : MonoBehaviour
 		}
 	}
 
-	void handle_drag_was_released()
+	void poll_drag_was_released()
 	{
 		if (this.drag_was_released && this.drag_joint.connectedBody != null)
 		{
@@ -167,7 +171,7 @@ public class CHARACTER : MonoBehaviour
 		}
 	}
 
-	void handle_drag_was_pressed(RaycastHit hit)
+	void poll_drag_was_pressed(RaycastHit hit)
 	{
 		if (this.drag_was_pressed)
 		{
@@ -175,7 +179,7 @@ public class CHARACTER : MonoBehaviour
 		}
 	}
 
-	void handle_collect_was_pressed(RaycastHit hit, COLLECTIBLE collectible)
+	void poll_collect_was_pressed(RaycastHit hit, COLLECTIBLE collectible)
 	{
 		if (this.collect_was_pressed)
 		{
@@ -184,16 +188,16 @@ public class CHARACTER : MonoBehaviour
 				|| HOTBAR.instance.GetComponent<HOTBAR>().try_allot(collectible.item, collectible.unique)
 				|| INVENTORY.instance.GetComponent<INVENTORY>().try_allot(collectible.item, collectible.unique))
 			{
-				Destroy(hit.transform.gameObject);
 				if (this.drag_is_pressed && this.drag_joint.connectedBody == hit.rigidbody)
 				{
 					this.detach();
 				}
+				Destroy(hit.transform.gameObject);
 			}
 		}
 	}
 
-	void handle_place_was_pressed(RaycastHit hit, ITEM item, COLLECTIBLE.UNIQUE unique)
+	void poll_place_was_pressed(RaycastHit hit, ITEM item, COLLECTIBLE.UNIQUE unique)
 	{
 		if (this.place_was_pressed)
 		{
@@ -205,12 +209,23 @@ public class CHARACTER : MonoBehaviour
 		}
 	}
 
-	void handle_special_place_was_pressed(RaycastHit hit, ITEM item, COLLECTIBLE.UNIQUE unique)
+	void poll_place_was_pressed_on_targetable(RaycastHit hit, ITEM item, COLLECTIBLE.UNIQUE unique)
 	{
 		if (this.place_was_pressed)
 		{
 			_ = HOTBAR.instance.selected_slot().try_remove();
-			//attach or destroy it
+			if (!unique.should_despawn)
+			{
+				Vector3 position = hit.transform.TransformPoint(unique.target_position);
+				Quaternion rotation = hit.transform.rotation * unique.target_rotation;
+				GameObject new_object = Instantiate(item.prefab, position, rotation);
+				new_object.GetComponent<COLLECTIBLE>().unique.is_locked = true;
+				FixedJoint joint = new_object.AddComponent<FixedJoint>();
+				joint.connectedBody = hit.rigidbody;
+				joint.enableCollision = true;
+				//joint.breakForce = 1000f;
+				//joint.breakTorque = 1000f;
+			}
 			HOTBAR.instance.increment_score();
 			this.score_sound_source.Play();
 		}
@@ -232,9 +247,10 @@ public class CHARACTER : MonoBehaviour
 		this.drag_is_pressed = this.drag_action.IsPressed();
 		this.drag_was_pressed = this.drag_action.WasPressedThisFrame();
 		this.drag_was_released = this.drag_action.WasReleasedThisFrame();
+		this.change_drag_depth_input = this.change_drag_depth_action.ReadValue<Vector2>();
 		this.collect_was_pressed = this.collect_action.WasPressedThisFrame();
 		this.place_was_pressed = this.place_action.WasPressedThisFrame();
-        this.inventory_was_pressed = this.inventory_action.WasPressedThisFrame();
+        this.inventory_was_pressed = this.toggle_inventory_action.WasPressedThisFrame();
 	}
 
 	void reset_input()
@@ -244,6 +260,7 @@ public class CHARACTER : MonoBehaviour
 		this.drag_is_pressed = false;
 		this.drag_was_pressed = false;
 		this.drag_was_released = false;
+		this.change_drag_depth_input = Vector2.zero;
 		this.collect_was_pressed = false;
 		this.place_was_pressed = false;
         this.inventory_was_pressed = false;
@@ -350,6 +367,8 @@ public class CHARACTER : MonoBehaviour
 
 	void drag()
 	{
+		this.drag_depth = this.drag_depth + this.change_drag_depth_input.y * this.drag_depth_sensitivity * Time.deltaTime;
+		this.drag_depth = Mathf.Clamp(this.drag_depth, 0f, reach);
 		this.drag_joint.transform.position = Camera.main.ViewportToWorldPoint(new Vector3(0.5f, 0.5f, this.drag_depth));
 		this.drag_line.SetPosition(0, this.drag_joint.transform.TransformPoint(this.drag_joint.anchor));
 		this.drag_line.SetPosition(1, this.drag_joint.connectedBody.transform.TransformPoint(this.drag_joint.connectedAnchor));

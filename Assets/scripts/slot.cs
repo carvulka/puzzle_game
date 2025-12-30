@@ -1,9 +1,8 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using TMPro;
 using System.Collections.Generic;
+using TMPro;
 
 public class SLOT : MonoBehaviour, IPointerDownHandler, IPointerEnterHandler, IPointerExitHandler
 {
@@ -36,7 +35,7 @@ public class SLOT : MonoBehaviour, IPointerDownHandler, IPointerEnterHandler, IP
 
     public void OnPointerDown(PointerEventData event_data)
     {
-        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+        if (event_data.button == PointerEventData.InputButton.Left)
         {
             this.exchange(INVENTORY.instance.mouse_slot);
             if (this.stack.Count > 0)
